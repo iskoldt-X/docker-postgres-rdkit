@@ -117,7 +117,7 @@ RUN cd /rdkit/build && make -j $(nproc) && make install
 
 # Set PostgreSQL environment variables to load RDKit
 RUN mkdir -p /etc/postgresql/$PG_MAJOR/main/ && \
-    echo "LD_LIBRARY_PATH = '/rdkit/lib:$CONDA_PREFIX/lib'" | tee -a /etc/postgresql/$PG_MAJOR/main/environment
+    echo "LD_LIBRARY_PATH = '/rdkit/lib'" >> /etc/postgresql/$PG_MAJOR/main/environment
 
 # Adjust permissions for RDKit directories
 RUN chgrp -R postgres /rdkit && chmod -R g+w /rdkit
@@ -136,7 +136,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
-    && echo "LD_LIBRARY_PATH = '/rdkit/lib:$CONDA_PREFIX/lib'" >> /etc/postgresql/$PG_MAJOR/main/environment
+    && mkdir -p /etc/postgresql/$PG_MAJOR/main/ \
+    && echo "LD_LIBRARY_PATH = '/rdkit/lib'" >> /etc/postgresql/$PG_MAJOR/main/environment
 
 # Copy RDKit files and PostgreSQL environment configuration from the builder stage
 COPY --from=builder /rdkit /rdkit
@@ -154,5 +155,5 @@ CMD export PATH="$PATH:/usr/lib/postgresql/$PG_MAJOR/bin" && \
     bash -i docker-ensure-initdb.sh && \
     cp /postgresql.conf /var/lib/postgresql/data/postgresql.conf && \
     useradd -m -s /bin/bash $POSTGRES_USER && \
-    su postgres -l -c 'export LD_LIBRARY_PATH="/rdkit/lib:$CONDA_PREFIX/lib" && \
+    su postgres -l -c 'export LD_LIBRARY_PATH="/rdkit/lib" && \
     postgres -D "$PGDATA"'
