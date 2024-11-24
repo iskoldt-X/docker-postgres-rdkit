@@ -5,7 +5,8 @@ FROM postgres:16 AS builder
 
 # Set environment variables
 ENV PG_MAJOR=16
-ENV PATH=/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/postgresql/$PG_MAJOR/bin
+ENV CONDA_INSTALL_PATH=/opt/miniconda
+ENV PATH=${CONDA_INSTALL_PATH}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/postgresql/$PG_MAJOR/bin
 
 # Install necessary packages and dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -52,13 +53,14 @@ RUN set -x && \
     wget "${INSTALLER_URL}" -O miniconda.sh -q && \
     echo "${SHA256SUM} miniconda.sh" > shasum && \
     sha256sum --check --status shasum && \
-    mkdir -p /opt/conda && \
-    bash miniconda.sh -b -p /opt/conda && \
+    rm -rf ${CONDA_INSTALL_PATH} && \
+    mkdir -p ${CONDA_INSTALL_PATH} && \
+    bash miniconda.sh -b -p ${CONDA_INSTALL_PATH} && \
     rm miniconda.sh shasum && \
-    ln -s /opt/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh && \
-    echo ". /opt/conda/etc/profile.d/conda.sh" >> ~/.bashrc && \
+    ln -s ${CONDA_INSTALL_PATH}/etc/profile.d/conda.sh /etc/profile.d/conda.sh && \
+    echo ". ${CONDA_INSTALL_PATH}/etc/profile.d/conda.sh" >> ~/.bashrc && \
     echo "conda activate base" >> ~/.bashrc && \
-    /opt/conda/bin/conda clean -afy
+    ${CONDA_INSTALL_PATH}/bin/conda clean -afy
 
 # Use bash shell with login to keep conda activation across RUN instructions
 SHELL ["/bin/bash", "--login", "-c"]
@@ -115,10 +117,6 @@ RUN mkdir /rdkit/build && \
 # Compile and install RDKit
 RUN cd /rdkit/build && make -j $(nproc) && make install
 
-# Set PostgreSQL environment variables to load RDKit
-RUN mkdir -p /etc/postgresql/$PG_MAJOR/main/ && \
-    echo "LD_LIBRARY_PATH = '/rdkit/lib'" >> /etc/postgresql/$PG_MAJOR/main/environment
-
 # Adjust permissions for RDKit directories
 RUN chgrp -R postgres /rdkit && chmod -R g+w /rdkit
 
@@ -131,17 +129,14 @@ FROM postgres:16
 ENV PG_MAJOR=16
 ENV PATH=/usr/lib/postgresql/$PG_MAJOR/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-# Install necessary packages and set LD_LIBRARY_PATH in one RUN command to minimize layers
+# Install necessary packages and clean up in one RUN command to minimize layers
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /etc/postgresql/$PG_MAJOR/main/ \
-    && echo "LD_LIBRARY_PATH = '/rdkit/lib'" >> /etc/postgresql/$PG_MAJOR/main/environment
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy RDKit files and PostgreSQL environment configuration from the builder stage
+# Copy RDKit files from the builder stage
 COPY --from=builder /rdkit /rdkit
-COPY --from=builder /etc/postgresql/$PG_MAJOR/main/environment /etc/postgresql/$PG_MAJOR/main/environment
 
 # Add custom PostgreSQL configuration file
 ADD postgresql.conf /postgresql.conf
@@ -151,9 +146,9 @@ ENV POSTGRES_USER=protwis
 STOPSIGNAL SIGINT
 
 # Define the entrypoint command
-CMD export PATH="$PATH:/usr/lib/postgresql/$PG_MAJOR/bin" && \
+CMD export LD_LIBRARY_PATH="/rdkit/lib" && \
+    export PATH="$PATH:/usr/lib/postgresql/$PG_MAJOR/bin" && \
     bash -i docker-ensure-initdb.sh && \
     cp /postgresql.conf /var/lib/postgresql/data/postgresql.conf && \
     useradd -m -s /bin/bash $POSTGRES_USER && \
-    su postgres -l -c 'export LD_LIBRARY_PATH="/rdkit/lib" && \
-    postgres -D "$PGDATA"'
+    su postgres -l -c 'postgres -D "$PGDATA"'
