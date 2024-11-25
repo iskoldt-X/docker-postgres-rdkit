@@ -69,7 +69,7 @@ RUN set -x && \
     ln -s ${CONDA_INSTALL_PATH}/bin/conda /usr/local/bin/conda && \
     # 清理 Conda
     ${CONDA_INSTALL_PATH}/bin/conda clean -afy && \
-    conda env create -n rdkit_built_dep -f "${CONDA_ENV_FILE}" && \
+    conda env create -y -c conda-forge -n rdkit_built_dep -f "${CONDA_ENV_FILE}" && \
     conda clean -afy && \
     conda run -n rdkit_built_dep pip install yapf==0.11.1 coverage==3.7.1
 
