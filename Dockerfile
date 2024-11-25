@@ -5,7 +5,7 @@ FROM postgres:16 AS builder
 
 # Set environment variables
 ENV PG_MAJOR=16
-ENV CONDA_INSTALL_PATH=/opt/miniconda
+ENV CONDA_INSTALL_PATH=/opt/conda_builder
 ENV PATH=${CONDA_INSTALL_PATH}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/postgresql/$PG_MAJOR/bin
 
 # Install necessary packages and dependencies
@@ -40,7 +40,7 @@ ARG SHA256SUM_LINUX64="b6597785e6b071f1ca69cf7be6d0161015b96340b9a9e132215d57134
 ARG INSTALLER_URL_AARCH64="https://repo.anaconda.com/miniconda/Miniconda3-py312_24.4.0-0-Linux-aarch64.sh"
 ARG SHA256SUM_AARCH64="832d48e11e444c1a25f320fccdd0f0fabefec63c1cd801e606836e1c9c76ad51"
 
-# Install Conda
+# Install Conda to /opt/conda_builder
 RUN set -x && \
     UNAME_M="$(uname -m)" && \
     if [ "${UNAME_M}" = "x86_64" ]; then \
@@ -101,7 +101,7 @@ RUN mkdir /rdkit/build && \
           -DRDK_INSTALL_STATIC_LIBS=OFF \
           -DRDK_BUILD_CPP_TESTS=ON \
           -DPYTHON_NUMPY_INCLUDE_PATH="$(python -c 'import numpy ; print(numpy.get_include())')" \
-          -DBOOST_ROOT="$CONDA_PREFIX" \
+          -DBOOST_ROOT="$CONDA_INSTALL_PATH" \
           -DBoost_NO_BOOST_CMAKE=OFF \
           -DBoost_NO_SYSTEM_PATHS=OFF \
           -DRDK_BUILD_AVALON_SUPPORT=ON \
@@ -129,11 +129,13 @@ FROM postgres:16
 ENV PG_MAJOR=16
 ENV PATH=/usr/lib/postgresql/$PG_MAJOR/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-# Install necessary packages and clean up in one RUN command to minimize layers
+# Install necessary packages and set LD_LIBRARY_PATH in one RUN command to minimize layers
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /etc/postgresql/$PG_MAJOR/main/ \
+    && echo "LD_LIBRARY_PATH='/rdkit/lib'" >> /etc/postgresql/$PG_MAJOR/main/environment
 
 # Copy RDKit files from the builder stage
 COPY --from=builder /rdkit /rdkit
