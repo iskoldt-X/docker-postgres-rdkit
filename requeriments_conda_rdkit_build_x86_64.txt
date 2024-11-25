@@ -1,1 +1,0 @@
-install/requeriments_conda_rdkit_build.txt
