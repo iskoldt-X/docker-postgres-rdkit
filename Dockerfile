@@ -64,9 +64,9 @@ RUN set -x && \
     # 清理 Conda
     ${CONDA_INSTALL_PATH}/bin/conda clean -afy
 
-# 添加 Conda 依赖文件 (注意: 这些指令在 RUN 步骤之外)
-ADD requirements_conda_rdkit_build_x86_64.txt /tmp/requirements_conda_rdkit_build_x86_64.txt
-ADD requirements_conda_rdkit_build_aarch64.txt /tmp/requirements_conda_rdkit_build_aarch64.txt
+# 添加 Conda 依赖文件
+COPY requirements_conda_rdkit_build_x86_64.txt /tmp/requirements_conda_rdkit_build_x86_64.txt
+COPY requirements_conda_rdkit_build_aarch64.txt /tmp/requirements_conda_rdkit_build_aarch64.txt
 
 # 创建 Conda 环境 for RDKit
 RUN set -x && \
@@ -139,7 +139,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /rdkit /rdkit
 
 # 添加自定义 PostgreSQL 配置文件
-ADD postgresql.conf /postgresql.conf
+COPY postgresql.conf /postgresql.conf
 
 # 设置 PostgreSQL 用户环境变量
 ENV POSTGRES_USER=protwis
