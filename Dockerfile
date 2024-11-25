@@ -49,10 +49,12 @@ RUN set -x && \
         INSTALLER_URL="${INSTALLER_URL_LINUX64}"; \
         SHA256SUM="${SHA256SUM_LINUX64}"; \
         CONDA_INSTALL_PATH="/opt/conda_builder_x86_64"; \
+        CONDA_ENV_FILE="/tmp/requirements_conda_rdkit_build_x86_64.txt"; \
     elif [ "${UNAME_M}" = "aarch64" ]; then \
         INSTALLER_URL="${INSTALLER_URL_AARCH64}"; \
         SHA256SUM="${SHA256SUM_AARCH64}"; \
         CONDA_INSTALL_PATH="/opt/conda_builder_aarch64"; \
+        CONDA_ENV_FILE="/tmp/requirements_conda_rdkit_build_aarch64.txt"; \
     fi && \
     wget "${INSTALLER_URL}" -O miniconda.sh -q && \
     echo "${SHA256SUM} miniconda.sh" > shasum && \
@@ -70,11 +72,6 @@ RUN set -x && \
 
 # 创建 Conda 环境 for RDKit
 RUN set -x && \
-    if [ "$(uname -m)" = "x86_64" ]; then \
-        CONDA_ENV_FILE="/tmp/requirements_conda_rdkit_build_x86_64.txt"; \
-    elif [ "$(uname -m)" = "aarch64" ]; then \
-        CONDA_ENV_FILE="/tmp/requirements_conda_rdkit_build_aarch64.txt"; \
-    fi && \
     conda env create -n rdkit_built_dep -f "${CONDA_ENV_FILE}" && \
     conda clean -afy
 
