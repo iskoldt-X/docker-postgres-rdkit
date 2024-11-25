@@ -54,7 +54,6 @@ RUN set -x && \
     echo "${SHA256SUM} miniconda.sh" > shasum && \
     sha256sum --check --status shasum && \
     rm -rf ${CONDA_INSTALL_PATH} && \
-    mkdir -p ${CONDA_INSTALL_PATH} && \
     bash miniconda.sh -b -p ${CONDA_INSTALL_PATH} && \
     rm miniconda.sh shasum && \
     ln -s ${CONDA_INSTALL_PATH}/etc/profile.d/conda.sh /etc/profile.d/conda.sh && \
