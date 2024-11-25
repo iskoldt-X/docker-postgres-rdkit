@@ -6,6 +6,10 @@ FROM postgres:16 AS builder
 # 设置主要环境变量
 ENV PG_MAJOR=16
 
+# 添加 Conda 依赖文件
+COPY requirements_conda_rdkit_build_x86_64.txt /tmp/requirements_conda_rdkit_build_x86_64.txt
+COPY requeriments_conda_rdkit_build_aarch64.txt /tmp/requirements_conda_rdkit_build_aarch64.txt
+
 # 安装必要的包和依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -63,10 +67,6 @@ RUN set -x && \
     ln -s ${CONDA_INSTALL_PATH}/bin/conda /usr/local/bin/conda && \
     # 清理 Conda
     ${CONDA_INSTALL_PATH}/bin/conda clean -afy
-
-# 添加 Conda 依赖文件
-COPY requirements_conda_rdkit_build_x86_64.txt /tmp/requirements_conda_rdkit_build_x86_64.txt
-COPY requirements_conda_rdkit_build_aarch64.txt /tmp/requirements_conda_rdkit_build_aarch64.txt
 
 # 创建 Conda 环境 for RDKit
 RUN set -x && \
