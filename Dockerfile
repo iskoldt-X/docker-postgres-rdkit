@@ -8,7 +8,7 @@ ENV PG_MAJOR=16
 
 # 添加 Conda 依赖文件
 COPY requirements_conda_rdkit_build_x86_64.txt /tmp/requirements_conda_rdkit_build_x86_64.txt
-COPY requeriments_conda_rdkit_build_aarch64.txt /tmp/requirements_conda_rdkit_build_aarch64.txt
+COPY requirements_conda_rdkit_build_aarch64.txt /tmp/requirements_conda_rdkit_build_aarch64.txt
 
 # 安装必要的包和依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
