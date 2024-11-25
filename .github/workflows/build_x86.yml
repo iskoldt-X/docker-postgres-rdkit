@@ -13,7 +13,7 @@ jobs:
       - 
         name: Set release date
         run: |
-          echo "RELEASE_DATE=$(date +%y.%m.%d)" >> ${GITHUB_ENV}
+          echo "RELEASE_DATE=$(date +%Y.%m.%d)" >> ${GITHUB_ENV}
       -
         name: Set up QEMU
         uses: docker/setup-qemu-action@v2
