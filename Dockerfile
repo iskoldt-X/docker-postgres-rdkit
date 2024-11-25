@@ -38,17 +38,19 @@ ARG SHA256SUM_LINUX64="b6597785e6b071f1ca69cf7be6d0161015b96340b9a9e132215d57134
 ARG INSTALLER_URL_AARCH64="https://repo.anaconda.com/miniconda/Miniconda3-py312_24.4.0-0-Linux-aarch64.sh"
 ARG SHA256SUM_AARCH64="832d48e11e444c1a25f320fccdd0f0fabefec63c1cd801e606836e1c9c76ad51"
 
-# 安装 Conda 到特定路径
+# 安装 Conda 到特定路径并创建环境
 RUN set -x && \
     UNAME_M="$(uname -m)" && \
     if [ "${UNAME_M}" = "x86_64" ]; then \
         INSTALLER_URL="${INSTALLER_URL_LINUX64}"; \
         SHA256SUM="${SHA256SUM_LINUX64}"; \
         CONDA_INSTALL_PATH="/opt/conda_builder_x86_64"; \
+        CONDA_ENV_FILE="/tmp/requirements_conda_rdkit_build_x86_64.txt"; \
     elif [ "${UNAME_M}" = "aarch64" ]; then \
         INSTALLER_URL="${INSTALLER_URL_AARCH64}"; \
         SHA256SUM="${SHA256SUM_AARCH64}"; \
         CONDA_INSTALL_PATH="/opt/conda_builder_aarch64"; \
+        CONDA_ENV_FILE="/tmp/requirements_conda_rdkit_build_aarch64.txt"; \
     fi && \
     wget "${INSTALLER_URL}" -O miniconda.sh -q && \
     echo "${SHA256SUM} miniconda.sh" > shasum && \
@@ -59,47 +61,39 @@ RUN set -x && \
     ln -s ${CONDA_INSTALL_PATH}/etc/profile.d/conda.sh /etc/profile.d/conda.sh && \
     echo ". ${CONDA_INSTALL_PATH}/etc/profile.d/conda.sh" >> ~/.bashrc && \
     echo "conda activate base" >> ~/.bashrc && \
-    ${CONDA_INSTALL_PATH}/bin/conda clean -afy
-
-# 添加 Conda bin 到 PATH
-# 移除错误的 ENV PATH 设置
-# ENV PATH=${CONDA_INSTALL_PATH}/bin:${PATH}
-
-# 添加 Conda 依赖文件
-ADD requeriments_conda_rdkit_build_x86_64.txt /tmp/requeriments_conda_rdkit_build_x86_64.txt
-ADD requeriments_conda_rdkit_build_aarch64.txt /tmp/requeriments_conda_rdkit_build_aarch64.txt
-
-# 创建 Conda 环境
-RUN set -x && \
-    if [ "$(uname -m)" = "x86_64" ]; then \
-        CONDA_ENV_FILE="/tmp/requeriments_conda_rdkit_build_x86_64.txt"; \
-    elif [ "$(uname -m)" = "aarch64" ]; then \
-        CONDA_ENV_FILE="/tmp/requeriments_conda_rdkit_build_aarch64.txt"; \
+    # 创建 Conda 到 /usr/local/bin 的符号链接
+    ln -s ${CONDA_INSTALL_PATH}/bin/conda /usr/local/bin/conda && \
+    # 清理 Conda
+    ${CONDA_INSTALL_PATH}/bin/conda clean -afy && \
+    # 添加 Conda 依赖文件
+    ADD requirements_conda_rdkit_build_x86_64.txt /tmp/requirements_conda_rdkit_build_x86_64.txt && \
+    ADD requirements_conda_rdkit_build_aarch64.txt /tmp/requirements_conda_rdkit_build_aarch64.txt && \
+    # 创建 Conda 环境
+    if [ "${UNAME_M}" = "x86_64" ]; then \
+        CONDA_ENV_FILE="/tmp/requirements_conda_rdkit_build_x86_64.txt"; \
+    elif [ "${UNAME_M}" = "aarch64" ]; then \
+        CONDA_ENV_FILE="/tmp/requirements_conda_rdkit_build_aarch64.txt"; \
     fi && \
-    ${CONDA_INSTALL_PATH}/bin/conda env create -n rdkit_built_dep -f "${CONDA_ENV_FILE}" && \
-    ${CONDA_INSTALL_PATH}/bin/conda clean -afy
-
-# 安装额外的 Python 包
-RUN ${CONDA_INSTALL_PATH}/bin/conda run -n rdkit_built_dep pip install yapf==0.11.1 coverage==3.7.1
-
-# 移除任何现有的 RDKit 目录
-RUN rm -fr rdkit
-
-# 下载 RDKit 源代码
-ARG RDKIT_VERSION=Release_2024_03_3
-RUN wget --quiet https://github.com/rdkit/rdkit/archive/refs/tags/${RDKIT_VERSION}.tar.gz \
-    && tar -xzf ${RDKIT_VERSION}.tar.gz \
-    && mv rdkit-${RDKIT_VERSION} rdkit \
-    && rm ${RDKIT_VERSION}.tar.gz
-
-# 配置并构建 RDKit
-RUN mkdir /rdkit/build && \
+    conda env create -n rdkit_built_dep -f "${CONDA_ENV_FILE}" && \
+    conda clean -afy && \
+    # 安装额外的 Python 包
+    conda run -n rdkit_built_dep pip install yapf==0.11.1 coverage==3.7.1 && \
+    # 移除任何现有的 RDKit 目录
+    rm -fr rdkit && \
+    # 下载 RDKit 源代码
+    RDKIT_VERSION=Release_2024_03_3 && \
+    wget --quiet https://github.com/rdkit/rdkit/archive/refs/tags/${RDKIT_VERSION}.tar.gz && \
+    tar -xzf ${RDKIT_VERSION}.tar.gz && \
+    mv rdkit-${RDKIT_VERSION} rdkit && \
+    rm ${RDKIT_VERSION}.tar.gz && \
+    # 配置并构建 RDKit
+    mkdir /rdkit/build && \
     cd /rdkit/build && \
-    ${CONDA_INSTALL_PATH}/bin/conda run -n rdkit_built_dep cmake -DPy_ENABLE_SHARED=1 \
+    conda run -n rdkit_built_dep cmake -DPy_ENABLE_SHARED=1 \
         -DRDK_INSTALL_INTREE=ON \
         -DRDK_INSTALL_STATIC_LIBS=OFF \
         -DRDK_BUILD_CPP_TESTS=ON \
-        -DPYTHON_NUMPY_INCLUDE_PATH="$(/opt/conda_builder_aarch64/bin/python -c 'import numpy ; print(numpy.get_include())')" \
+        -DPYTHON_NUMPY_INCLUDE_PATH="$(conda run -n rdkit_built_dep python -c 'import numpy ; print(numpy.get_include())')" \
         -DBOOST_ROOT="${CONDA_INSTALL_PATH}" \
         -DBoost_INCLUDEDIR="${CONDA_INSTALL_PATH}/include" \
         -DBoost_LIBRARYDIR="${CONDA_INSTALL_PATH}/lib" \
@@ -114,11 +108,10 @@ RUN mkdir /rdkit/build && \
         -DPostgreSQL_TYPE_INCLUDE_DIR="/usr/include/postgresql/$PG_MAJOR/server" \
         -DPostgreSQL_LIBRARY="/usr/lib/aarch64-linux-gnu/libpq.so.5" \
         .. && \
-    ${CONDA_INSTALL_PATH}/bin/conda run -n rdkit_built_dep make -j $(nproc) && \
-    ${CONDA_INSTALL_PATH}/bin/conda run -n rdkit_built_dep make install
-
-# 调整 RDKit 目录权限
-RUN chgrp -R postgres /rdkit && chmod -R g+w /rdkit
+    conda run -n rdkit_built_dep make -j $(nproc) && \
+    conda run -n rdkit_built_dep make install && \
+    # 调整 RDKit 目录权限
+    chgrp -R postgres /rdkit && chmod -R g+w /rdkit
 
 # ================================
 # Stage 2: Final Image
