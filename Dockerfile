@@ -3,10 +3,10 @@
 # ================================
 FROM postgres:16 AS builder
 
-# Set environment variables
+# 设置主要环境变量
 ENV PG_MAJOR=16
 
-# Install necessary packages and dependencies
+# 安装必要的包和依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     wget \
@@ -32,13 +32,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         postgresql-server-dev-all \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Define Miniconda installation arguments
+# 定义 Miniconda 安装参数
 ARG INSTALLER_URL_LINUX64="https://repo.anaconda.com/miniconda/Miniconda3-py312_24.4.0-0-Linux-x86_64.sh"
 ARG SHA256SUM_LINUX64="b6597785e6b071f1ca69cf7be6d0161015b96340b9a9e132215d5713408c3a7c"
 ARG INSTALLER_URL_AARCH64="https://repo.anaconda.com/miniconda/Miniconda3-py312_24.4.0-0-Linux-aarch64.sh"
 ARG SHA256SUM_AARCH64="832d48e11e444c1a25f320fccdd0f0fabefec63c1cd801e606836e1c9c76ad51"
 
-# Install Conda to unique path per architecture
+# 安装 Conda 到特定路径
 RUN set -x && \
     UNAME_M="$(uname -m)" && \
     if [ "${UNAME_M}" = "x86_64" ]; then \
@@ -61,44 +61,45 @@ RUN set -x && \
     echo "conda activate base" >> ~/.bashrc && \
     ${CONDA_INSTALL_PATH}/bin/conda clean -afy
 
-# Set PATH for Conda
-ENV PATH=${CONDA_INSTALL_PATH}/bin:${PATH}
+# 添加 Conda bin 到 PATH
+# 移除错误的 ENV PATH 设置
+# ENV PATH=${CONDA_INSTALL_PATH}/bin:${PATH}
 
-# Add Conda requirements files
+# 添加 Conda 依赖文件
 ADD requeriments_conda_rdkit_build_x86_64.txt /tmp/requeriments_conda_rdkit_build_x86_64.txt
 ADD requeriments_conda_rdkit_build_aarch64.txt /tmp/requeriments_conda_rdkit_build_aarch64.txt
 
-# Create Conda environment for building RDKit
+# 创建 Conda 环境
 RUN set -x && \
     if [ "$(uname -m)" = "x86_64" ]; then \
         CONDA_ENV_FILE="/tmp/requeriments_conda_rdkit_build_x86_64.txt"; \
     elif [ "$(uname -m)" = "aarch64" ]; then \
         CONDA_ENV_FILE="/tmp/requeriments_conda_rdkit_build_aarch64.txt"; \
     fi && \
-    conda env create -n rdkit_built_dep -f "${CONDA_ENV_FILE}" && \
-    conda clean -afy
+    ${CONDA_INSTALL_PATH}/bin/conda env create -n rdkit_built_dep -f "${CONDA_ENV_FILE}" && \
+    ${CONDA_INSTALL_PATH}/bin/conda clean -afy
 
-# Install additional Python packages
-RUN conda run -n rdkit_built_dep pip install yapf==0.11.1 coverage==3.7.1
+# 安装额外的 Python 包
+RUN ${CONDA_INSTALL_PATH}/bin/conda run -n rdkit_built_dep pip install yapf==0.11.1 coverage==3.7.1
 
-# Remove any existing RDKit directory
+# 移除任何现有的 RDKit 目录
 RUN rm -fr rdkit
 
-# Download RDKit source code
+# 下载 RDKit 源代码
 ARG RDKIT_VERSION=Release_2024_03_3
 RUN wget --quiet https://github.com/rdkit/rdkit/archive/refs/tags/${RDKIT_VERSION}.tar.gz \
     && tar -xzf ${RDKIT_VERSION}.tar.gz \
     && mv rdkit-${RDKIT_VERSION} rdkit \
     && rm ${RDKIT_VERSION}.tar.gz
 
-# Configure and build RDKit
+# 配置并构建 RDKit
 RUN mkdir /rdkit/build && \
     cd /rdkit/build && \
-    conda run -n rdkit_built_dep cmake -DPy_ENABLE_SHARED=1 \
+    ${CONDA_INSTALL_PATH}/bin/conda run -n rdkit_built_dep cmake -DPy_ENABLE_SHARED=1 \
         -DRDK_INSTALL_INTREE=ON \
         -DRDK_INSTALL_STATIC_LIBS=OFF \
         -DRDK_BUILD_CPP_TESTS=ON \
-        -DPYTHON_NUMPY_INCLUDE_PATH="$(conda run -n rdkit_built_dep python -c 'import numpy ; print(numpy.get_include())')" \
+        -DPYTHON_NUMPY_INCLUDE_PATH="$(/opt/conda_builder_aarch64/bin/python -c 'import numpy ; print(numpy.get_include())')" \
         -DBOOST_ROOT="${CONDA_INSTALL_PATH}" \
         -DBoost_INCLUDEDIR="${CONDA_INSTALL_PATH}/include" \
         -DBoost_LIBRARYDIR="${CONDA_INSTALL_PATH}/lib" \
@@ -113,10 +114,10 @@ RUN mkdir /rdkit/build && \
         -DPostgreSQL_TYPE_INCLUDE_DIR="/usr/include/postgresql/$PG_MAJOR/server" \
         -DPostgreSQL_LIBRARY="/usr/lib/aarch64-linux-gnu/libpq.so.5" \
         .. && \
-    conda run -n rdkit_built_dep make -j $(nproc) && \
-    conda run -n rdkit_built_dep make install
+    ${CONDA_INSTALL_PATH}/bin/conda run -n rdkit_built_dep make -j $(nproc) && \
+    ${CONDA_INSTALL_PATH}/bin/conda run -n rdkit_built_dep make install
 
-# Adjust permissions for RDKit directories
+# 调整 RDKit 目录权限
 RUN chgrp -R postgres /rdkit && chmod -R g+w /rdkit
 
 # ================================
@@ -124,11 +125,11 @@ RUN chgrp -R postgres /rdkit && chmod -R g+w /rdkit
 # ================================
 FROM postgres:16
 
-# Set environment variables
+# 设置环境变量
 ENV PG_MAJOR=16
 ENV PATH=/usr/lib/postgresql/$PG_MAJOR/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-# Install necessary packages and set LD_LIBRARY_PATH in one RUN command to minimize layers
+# 安装必要的包并设置 LD_LIBRARY_PATH
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && apt-get clean \
@@ -136,17 +137,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && mkdir -p /etc/postgresql/$PG_MAJOR/main/ \
     && echo "LD_LIBRARY_PATH='/rdkit/lib'" >> /etc/postgresql/$PG_MAJOR/main/environment
 
-# Copy RDKit files from the builder stage
+# 从构建阶段复制 RDKit 文件
 COPY --from=builder /rdkit /rdkit
 
-# Add custom PostgreSQL configuration file
+# 添加自定义 PostgreSQL 配置文件
 ADD postgresql.conf /postgresql.conf
 
-# Set environment variables for PostgreSQL user
+# 设置 PostgreSQL 用户环境变量
 ENV POSTGRES_USER=protwis
 STOPSIGNAL SIGINT
 
-# Define the entrypoint command
+# 定义入口命令
 CMD export LD_LIBRARY_PATH="/rdkit/lib" && \
     export PATH="$PATH:/usr/lib/postgresql/$PG_MAJOR/bin" && \
     bash -i docker-ensure-initdb.sh && \
