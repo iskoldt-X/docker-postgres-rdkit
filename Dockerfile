@@ -68,15 +68,10 @@ RUN set -x && \
     # 创建 Conda 到 /usr/local/bin 的符号链接
     ln -s ${CONDA_INSTALL_PATH}/bin/conda /usr/local/bin/conda && \
     # 清理 Conda
-    ${CONDA_INSTALL_PATH}/bin/conda clean -afy
-
-# 创建 Conda 环境 for RDKit
-RUN set -x && \
+    ${CONDA_INSTALL_PATH}/bin/conda clean -afy && \
     conda env create -n rdkit_built_dep -f "${CONDA_ENV_FILE}" && \
-    conda clean -afy
-
-# 安装额外的 Python 包
-RUN conda run -n rdkit_built_dep pip install yapf==0.11.1 coverage==3.7.1
+    conda clean -afy && \
+    conda run -n rdkit_built_dep pip install yapf==0.11.1 coverage==3.7.1
 
 # 移除任何现有的 RDKit 目录
 RUN rm -fr rdkit
