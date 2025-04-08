@@ -75,9 +75,8 @@ RUN set -x && \
 
 # 移除任何现有的 RDKit 目录
 RUN rm -fr rdkit
-
 # 下载 RDKit 源代码
-ARG RDKIT_VERSION=Release_2024_03_3
+ARG RDKIT_VERSION=Release_2025_03_1
 RUN wget --quiet https://github.com/rdkit/rdkit/archive/refs/tags/${RDKIT_VERSION}.tar.gz \
     && tar -xzf ${RDKIT_VERSION}.tar.gz \
     && mv rdkit-${RDKIT_VERSION} rdkit \
