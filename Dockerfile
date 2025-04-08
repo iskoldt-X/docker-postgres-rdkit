@@ -83,7 +83,8 @@ RUN wget --quiet https://github.com/rdkit/rdkit/archive/refs/tags/${RDKIT_VERSIO
     && rm ${RDKIT_VERSION}.tar.gz
 
 # 配置并构建 RDKit
-RUN mkdir /rdkit/build && \
+RUN UNAME_M="$(uname -m)" && \
+    mkdir /rdkit/build && \
     cd /rdkit/build && \
     conda run -n rdkit_built_dep cmake -DPy_ENABLE_SHARED=1 \
         -DRDK_INSTALL_INTREE=ON \
