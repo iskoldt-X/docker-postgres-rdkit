@@ -102,7 +102,7 @@ RUN mkdir /rdkit/build && \
         -DPostgreSQL_CONFIG_DIR=/usr/lib/postgresql/$PG_MAJOR/bin \
         -DPostgreSQL_INCLUDE_DIR="/usr/include/postgresql" \
         -DPostgreSQL_TYPE_INCLUDE_DIR="/usr/include/postgresql/$PG_MAJOR/server" \
-        -DPostgreSQL_LIBRARY="/usr/lib/aarch64-linux-gnu/libpq.so.5" \
+        -DPostgreSQL_LIBRARY="/usr/lib/${UNAME_M}-linux-gnu/libpq.so.5" \
         .. && \
     conda run -n rdkit_built_dep make -j $(nproc) && \
     conda run -n rdkit_built_dep make install && \
