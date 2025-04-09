@@ -115,7 +115,7 @@ pycparser
 pyparsing
 pysocks
 pytest
-python
+python=3.11
 python-dateutil
 python-tzdata
 python_abi
