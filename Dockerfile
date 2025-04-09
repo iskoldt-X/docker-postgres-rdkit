@@ -27,6 +27,7 @@ RUN UNAME_M="$(uname -m)" && \
     subversion \
     bzip2 \
     ca-certificates \
+    libcairo2-dev \
     curl \
     gnupg \
     $( [ "$UNAME_M" = "aarch64" ] && echo "libboost-all-dev" ) \
