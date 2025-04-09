@@ -115,10 +115,10 @@ pycparser=2.21=pyhd3eb1b0_0
 pyparsing=3.1.2=pyhd8ed1ab_0
 pysocks=1.7.1=py39hd43f75c_0
 pytest=8.2.2=pyhd8ed1ab_0
-python=3.9.18=h4ac3b42_0_cpython
-python-dateutil=2.9.0=pyhd8ed1ab_0
-python-tzdata=2024.1=pyhd8ed1ab_0
-python_abi=3.9=4_cp39
+python=3.11
+python-dateutil
+python-tzdata
+python_abi
 pytz=2024.1=pyhd8ed1ab_0
 qhull=2020.2=h70be974_5
 readline=8.2=h998d150_0
