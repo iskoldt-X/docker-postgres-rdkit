@@ -11,7 +11,8 @@ COPY requirements_conda_rdkit_build_x86_64.txt /tmp/requirements_conda_rdkit_bui
 COPY requirements_conda_rdkit_build_aarch64.txt /tmp/requirements_conda_rdkit_build_aarch64.txt
 
 # 安装必要的包和依赖
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN UNAME_M="$(uname -m)" && \
+    apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     wget \
     git \
@@ -28,6 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     gnupg \
+    $( [ "$UNAME_M" = "aarch64" ] && echo "libboost-all-dev" ) \
     && dpkg --remove-architecture armhf || true \
     && echo "deb http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
     && wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add - \
