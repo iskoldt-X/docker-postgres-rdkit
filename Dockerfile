@@ -3,13 +3,10 @@
 # ================================
 FROM postgres:16 AS builder
 
-
 ENV PG_MAJOR=16
-
 
 COPY requirements_conda_rdkit_build_x86_64.txt /tmp/requirements_conda_rdkit_build_x86_64.txt
 COPY requirements_conda_rdkit_build_aarch64.txt /tmp/requirements_conda_rdkit_build_aarch64.txt
-
 
 RUN UNAME_M="$(uname -m)" && \
     apt-get update && apt-get install -y --no-install-recommends \
@@ -32,8 +29,8 @@ RUN UNAME_M="$(uname -m)" && \
     gnupg \
     && dpkg --remove-architecture armhf || true \
     && apt-get update && apt-get install -y --no-install-recommends \
-        postgresql-server-dev-$PG_MAJOR \
-        postgresql-server-dev-all \
+    postgresql-server-dev-$PG_MAJOR \
+    postgresql-server-dev-all \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 ARG INSTALLER_URL_LINUX64="https://repo.anaconda.com/miniconda/Miniconda3-py312_24.4.0-0-Linux-x86_64.sh"
@@ -41,19 +38,18 @@ ARG SHA256SUM_LINUX64="b6597785e6b071f1ca69cf7be6d0161015b96340b9a9e132215d57134
 ARG INSTALLER_URL_AARCH64="https://repo.anaconda.com/miniconda/Miniconda3-py312_24.4.0-0-Linux-aarch64.sh"
 ARG SHA256SUM_AARCH64="832d48e11e444c1a25f320fccdd0f0fabefec63c1cd801e606836e1c9c76ad51"
 
-
 RUN set -x && \
     UNAME_M="$(uname -m)" && \
     if [ "${UNAME_M}" = "x86_64" ]; then \
-        INSTALLER_URL="${INSTALLER_URL_LINUX64}"; \
-        SHA256SUM="${SHA256SUM_LINUX64}"; \
-        CONDA_INSTALL_PATH="/opt/conda_builder_x86_64"; \
-        CONDA_ENV_FILE="/tmp/requirements_conda_rdkit_build_x86_64.txt"; \
+    INSTALLER_URL="${INSTALLER_URL_LINUX64}"; \
+    SHA256SUM="${SHA256SUM_LINUX64}"; \
+    CONDA_INSTALL_PATH="/opt/conda_builder_x86_64"; \
+    CONDA_ENV_FILE="/tmp/requirements_conda_rdkit_build_x86_64.txt"; \
     elif [ "${UNAME_M}" = "aarch64" ]; then \
-        INSTALLER_URL="${INSTALLER_URL_AARCH64}"; \
-        SHA256SUM="${SHA256SUM_AARCH64}"; \
-        CONDA_INSTALL_PATH="/opt/conda_builder_aarch64"; \
-        CONDA_ENV_FILE="/tmp/requirements_conda_rdkit_build_aarch64.txt"; \
+    INSTALLER_URL="${INSTALLER_URL_AARCH64}"; \
+    SHA256SUM="${SHA256SUM_AARCH64}"; \
+    CONDA_INSTALL_PATH="/opt/conda_builder_aarch64"; \
+    CONDA_ENV_FILE="/tmp/requirements_conda_rdkit_build_aarch64.txt"; \
     fi && \
     wget "${INSTALLER_URL}" -O miniconda.sh -q && \
     echo "${SHA256SUM} miniconda.sh" > shasum && \
@@ -78,32 +74,32 @@ RUN wget --quiet https://github.com/rdkit/rdkit/archive/refs/tags/${RDKIT_VERSIO
     && mv rdkit-${RDKIT_VERSION} rdkit \
     && rm ${RDKIT_VERSION}.tar.gz
 
-
 RUN UNAME_M="$(uname -m)" && \
     CONDA_ENV_PATH="/opt/conda_builder_${UNAME_M}/envs/rdkit_built_dep" && \
     mkdir /rdkit/build && \
     cd /rdkit/build && \
+    echo "Running CMake with Conda Env Path: ${CONDA_ENV_PATH}" && \
     conda run -n rdkit_built_dep cmake -DPy_ENABLE_SHARED=1 \
-        -DRDK_INSTALL_INTREE=ON \
-        -DRDK_INSTALL_STATIC_LIBS=OFF \
-        -DRDK_BUILD_CPP_TESTS=OFF \
-        -DPYTHON_NUMPY_INCLUDE_PATH="$(conda run -n rdkit_built_dep python -c 'import numpy ; print(numpy.get_include())')" \
-        -DCMAKE_PREFIX_PATH="${CONDA_ENV_PATH}" \
-        -DBoost_ROOT="${CONDA_ENV_PATH}" \
-        -DBoost_INCLUDEDIR="${CONDA_ENV_PATH}/include" \
-        -DBoost_LIBRARYDIR="${CONDA_ENV_PATH}/lib" \
-        -DBoost_NO_BOOST_CMAKE=OFF \
-        -DBoost_NO_SYSTEM_PATHS=ON \
-        -DRDK_BUILD_AVALON_SUPPORT=ON \
-        -DRDK_BUILD_CAIRO_SUPPORT=ON \
-        -DRDK_BUILD_INCHI_SUPPORT=ON \
-        -DRDK_BUILD_PGSQL=ON \
-        -DPostgreSQL_CONFIG_DIR=/usr/lib/postgresql/$PG_MAJOR/bin \
-        -DPostgreSQL_INCLUDE_DIR="/usr/include/postgresql" \
-        -DPostgreSQL_TYPE_INCLUDE_DIR="/usr/include/postgresql/$PG_MAJOR/server" \
-        -DPostgreSQL_LIBRARY="/usr/lib/${UNAME_M}-linux-gnu/libpq.so.5" \
-        .. && \
-    conda run -n rdkit_built_dep make -j $(nproc) && \
+    -DRDK_INSTALL_INTREE=ON \
+    -DRDK_INSTALL_STATIC_LIBS=OFF \
+    -DRDK_BUILD_CPP_TESTS=OFF \
+    -DPYTHON_NUMPY_INCLUDE_PATH="$(conda run -n rdkit_built_dep python -c 'import numpy ; print(numpy.get_include())')" \
+    -DCMAKE_PREFIX_PATH="${CONDA_ENV_PATH}" \
+    -DBoost_ROOT="${CONDA_ENV_PATH}" \
+    -DBoost_INCLUDEDIR="${CONDA_ENV_PATH}/include" \
+    -DBoost_LIBRARYDIR="${CONDA_ENV_PATH}/lib" \
+    -DBoost_NO_BOOST_CMAKE=OFF \
+    -DBoost_NO_SYSTEM_PATHS=ON \
+    -DRDK_BUILD_AVALON_SUPPORT=ON \
+    -DRDK_BUILD_CAIRO_SUPPORT=ON \
+    -DRDK_BUILD_INCHI_SUPPORT=ON \
+    -DRDK_BUILD_PGSQL=ON \
+    -DPostgreSQL_CONFIG_DIR=/usr/lib/postgresql/$PG_MAJOR/bin \
+    -DPostgreSQL_INCLUDE_DIR="/usr/include/postgresql" \
+    -DPostgreSQL_TYPE_INCLUDE_DIR="/usr/include/postgresql/$PG_MAJOR/server" \
+    -DPostgreSQL_LIBRARY="/usr/lib/${UNAME_M}-linux-gnu/libpq.so.5" \
+    .. && \
+    conda run -n rdkit_built_dep make -j 2 && \
     conda run -n rdkit_built_dep make install && \
     chgrp -R postgres /rdkit && chmod -R g+w /rdkit
 
