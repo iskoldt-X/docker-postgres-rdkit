@@ -2,7 +2,7 @@ name: Build and push Docker image arm64
 on:
   push:
     branches:
-      - "master"
+      - "main"
 jobs:
   docker:
     runs-on: self-hosted

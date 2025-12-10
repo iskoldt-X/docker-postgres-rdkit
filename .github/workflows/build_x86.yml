@@ -2,7 +2,7 @@ name: Build and push Docker image amd64
 on:
   push:
     branches:
-      - "master"
+      - "main"
 jobs:
   docker:
     runs-on: ubuntu-latest
