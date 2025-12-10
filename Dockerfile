@@ -88,4 +88,9 @@ RUN echo "/rdkit/lib" > /etc/ld.so.conf.d/rdkit.conf && ldconfig
 
 # Original configuration
 ENV POSTGRES_USER=protwis
-CMD ["postgres"]
+
+# Custom Configuration
+COPY postgresql.conf /etc/postgresql/postgresql.conf
+RUN chown postgres:postgres /etc/postgresql/postgresql.conf
+
+CMD ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
