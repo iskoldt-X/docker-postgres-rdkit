@@ -1,247 +1,91 @@
-# Requires 16 GB of RAM for building RDKIT with 14 CPUs, but it depends on the number of CPUs used for the build. 
-# You'll probably need to change your docker settings to increase the maximum RAM the containers
-# are able to use.
-
-FROM postgres:16
-
+# ================================
+# Stage 1: Builder (Native Debian)
+# ================================
+FROM postgres:16-bookworm AS builder
+ARG RDKIT_VERSION=Release_2025_03_1
 ENV PG_MAJOR=16
-ENV PATH=/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/postgresql/$PG_MAJOR/bin
 
-RUN  apt-get update \
-&& apt-get install -yq --no-install-recommends \
+# 1. Install build tools and dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    wget \
+    cmake \
     git \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
+    ca-certificates \
+    postgresql-server-dev-${PG_MAJOR} \
+    libxml2-dev \
+    libboost-all-dev \
+    libpython3-dev \
+    python3-numpy \
+    libsqlite3-dev \
+    zlib1g-dev \
+    libfreetype6-dev \
+    libeigen3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. Download source code
+WORKDIR /rdkit-src
+RUN git clone --depth 1 --branch ${RDKIT_VERSION} https://github.com/rdkit/rdkit.git . \
+    && rm -rf .git
+
+# 3. Compile RDKit
+# Key fix points
+# 1. -DCMAKE_INSTALL_PREFIX=/rdkit : Ensure make install puts files in /rdkit, so Stage 2 can copy them
+# 2. -DPostgreSQL_... : Resolve missing postgres.h issue
+# 3. -std=gnu89 : Resolve old code compilation issues with new GCC
+RUN mkdir build && cd build && \
+    cmake .. \
+    -DCMAKE_INSTALL_PREFIX=/rdkit \
+    -DCMAKE_C_FLAGS="-Wno-error=implicit-function-declaration -std=gnu89" \
+    -DRDK_BUILD_PYTHON_WRAPPERS=ON \
+    -DRDK_BUILD_PGSQL=ON \
+    -DRDK_INSTALL_INTREE=OFF \
+    -DRDK_INSTALL_STATIC_LIBS=OFF \
+    -DRDK_BUILD_CPP_TESTS=OFF \
+    -DPy_ENABLE_SHARED=1 \
+    -DRDK_BUILD_AVALON_SUPPORT=ON \
+    -DRDK_BUILD_CAIRO_SUPPORT=OFF \
+    -DRDK_BUILD_INCHI_SUPPORT=ON \
+    -DRDK_BUILD_FREETYPE_SUPPORT=ON \
+    -DPostgreSQL_CONFIG_DIR=/usr/lib/postgresql/${PG_MAJOR}/bin \
+    -DPostgreSQL_INCLUDE_DIR=/usr/include/postgresql \
+    -DPostgreSQL_TYPE_INCLUDE_DIR=/usr/include/postgresql/${PG_MAJOR}/server \
+    && \
+    make -j $(nproc) && \
+    make install
+
+# ================================
+# Stage 2: Final Image
+# ================================
+FROM postgres:16-bookworm
+ENV PG_MAJOR=16
+
+# Install runtime dependencies
+# libfreetype6 is required, otherwise rdkit.so will report symbol lookup error
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libboost-serialization1.74.0 \
+    libboost-system1.74.0 \
+    libboost-iostreams1.74.0 \
+    libboost-python1.74.0 \
+    libpython3.11 \
+    python3-numpy \
+    libxml2 \
     libfreetype6 \
-    libxrender1 \
-    mercurial \
-    openssh-client \
-    procps \
-    subversion \
-    bzip2 \
-    postgresql-server-dev-$PG_MAJOR \
-    postgresql-server-dev-all  \
- && apt-get clean \
- && rm -rf /var/lib/apt/lists/*
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN  apt-get update \
-&& apt-get install -yq --no-install-recommends \
-    ca-certificates; exit 0
+# Copy RDKit core library (now available in builder)
+COPY --from=builder /rdkit /rdkit
 
-RUN UNAME_M="$(uname -m)" && \
-    if [ "${UNAME_M}" = "aarch64" ]; then \
-        apt-get update \
-        && apt-get install -yq --no-install-recommends \
-            libboost-all-dev; \
-    fi
+# Copy Postgres extension
+# Principle: RDKit extension is installed, but usually according to pg_config to system Postgres directory
+# So we need to take them out from system directory
+COPY --from=builder /usr/lib/postgresql/${PG_MAJOR}/lib/rdkit.so /usr/lib/postgresql/${PG_MAJOR}/lib/
+COPY --from=builder /usr/share/postgresql/${PG_MAJOR}/extension/rdkit* /usr/share/postgresql/${PG_MAJOR}/extension/
 
-RUN apt-get clean \
- && rm -rf /var/lib/apt/lists/*
+# Link library
+# Tell system to look for libRDKit*.so in /rdkit/lib
+RUN echo "/rdkit/lib" > /etc/ld.so.conf.d/rdkit.conf && ldconfig
 
-WORKDIR /
-
-# DOWNLOAD AND INSTALL CONDA
-# source: https://github.com/ContinuumIO/docker-images/blob/main/miniconda3/debian/Dockerfile
-
-# Leave these args here to better use the Docker build cache
-# renovate: datasource=custom.miniconda_installer
-ARG INSTALLER_URL_LINUX64="https://repo.anaconda.com/miniconda/Miniconda3-py312_24.4.0-0-Linux-x86_64.sh"
-ARG SHA256SUM_LINUX64="b6597785e6b071f1ca69cf7be6d0161015b96340b9a9e132215d5713408c3a7c"
-# renovate: datasource=custom.miniconda_installer
-ARG INSTALLER_URL_S390X="https://repo.anaconda.com/miniconda/Miniconda3-py312_24.4.0-0-Linux-s390x.sh"
-ARG SHA256SUM_S390X="e973f1b6352d58b1ab35f30424f1565d7ffa469dcde2d52c86ec1c117db11aad"
-# renovate: datasource=custom.miniconda_installer
-
-ARG INSTALLER_URL_AARCH64="https://repo.anaconda.com/miniconda/Miniconda3-py312_24.4.0-0-Linux-aarch64.sh"
-ARG SHA256SUM_AARCH64="832d48e11e444c1a25f320fccdd0f0fabefec63c1cd801e606836e1c9c76ad51"
-
-RUN set -x && \
-    UNAME_M="$(uname -m)" && \
-    if [ "${UNAME_M}" = "x86_64" ]; then \
-        INSTALLER_URL="${INSTALLER_URL_LINUX64}"; \
-        SHA256SUM="${SHA256SUM_LINUX64}"; \
-    elif [ "${UNAME_M}" = "s390x" ]; then \
-        INSTALLER_URL="${INSTALLER_URL_S390X}"; \
-        SHA256SUM="${SHA256SUM_S390X}"; \
-    elif [ "${UNAME_M}" = "aarch64" ]; then \
-        INSTALLER_URL="${INSTALLER_URL_AARCH64}"; \
-        SHA256SUM="${SHA256SUM_AARCH64}"; \
-    fi && \
-    wget "${INSTALLER_URL}" -O miniconda.sh -q && \
-    echo "${SHA256SUM} miniconda.sh" > shasum && \
-    sha256sum --check --status shasum && \
-    mkdir -p /opt && \
-    bash miniconda.sh -b -p /opt/conda && \
-    rm miniconda.sh shasum && \
-    ln -s /opt/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh && \
-    echo ". /opt/conda/etc/profile.d/conda.sh" >> ~/.bashrc && \
-    echo "conda activate base" >> ~/.bashrc && \
-    find /opt/conda/ -follow -type f -name '*.a' -delete && \
-    find /opt/conda/ -follow -type f -name '*.js.map' -delete && \
-    /opt/conda/bin/conda clean -afy
-
-# use a bash shell with login so it keeps conda activation and environment across RUN instructions
-SHELL ["/bin/bash", "--login", "-c"] 
-
-# For downloading older versions of RDKIT 
-# RUN rm -fr rdkit
-# ARG RDKIT_VERSION=Release_2020_09_1
-# RUN wget --quiet https://github.com/rdkit/rdkit/archive/${RDKIT_VERSION}.tar.gz \
-#  && tar -xzf ${RDKIT_VERSION}.tar.gz \
-#  && mv rdkit-${RDKIT_VERSION} rdkit2 \
-#  && rm ${RDKIT_VERSION}.tar.gz
-
-# DOWNLOAD RDKIT
-RUN rm -fr rdkit
-ARG RDKIT_VERSION=Release_2024_03_3
-RUN wget --quiet https://github.com/rdkit/rdkit/archive/refs/tags/${RDKIT_VERSION}.tar.gz \
- && tar -xzf ${RDKIT_VERSION}.tar.gz \
- && mv rdkit-${RDKIT_VERSION} rdkit \
- && rm ${RDKIT_VERSION}.tar.gz
-
-# CREATE CONDA RDKIT BUILD ENVIRONMENT
-# source: https://www.rdkit.org/docs/Install.html
-
-ADD requeriments_conda_rdkit_build_x86_64.txt .
-ADD requeriments_conda_rdkit_build_aarch64.txt .
-
-WORKDIR /
-
-RUN UNAME_M="$(uname -m)" && \
-    if [ "${UNAME_M}" = "x86_64" ]; then \
-        CONDA_ENV_REQUERIMENTS_FILE="requeriments_conda_rdkit_build_x86_64.txt"; \
-    elif [ "${UNAME_M}" = "s390x" ]; then \
-        CONDA_ENV_REQUERIMENTS_FILE="requeriments_conda_rdkit_build_s390x.txt"; \
-    elif [ "${UNAME_M}" = "aarch64" ]; then \
-        CONDA_ENV_REQUERIMENTS_FILE="requeriments_conda_rdkit_build_aarch64.txt"; \
-    fi; conda create -y -c conda-forge --name rdkit_built_dep --file "${CONDA_ENV_REQUERIMENTS_FILE}"
-
-# RUN conda create -y --name rdkit_built_dep 
-# RUN conda activate rdkit_built_dep;conda install -y --solver=classic conda-forge::conda-libmamba-solver conda-forge::libmamba conda-forge::libmambapy conda-forge::libarchive
-# # REMINDER: update numpy version requeriment for future RDKit versions
-# RUN conda activate rdkit_built_dep;conda install -y -c conda-forge numpy=1 matplotlib catch2 pytest; \
-# conda install -y -c conda-forge cmake cairo pillow eigen pkg-config; \ 
-# conda install -y -c conda-forge pandas;
-
-# RUN UNAME_M="$(uname -m)" && \
-#     if [ "${UNAME_M}" = "x86_64" ]; then \
-#         conda install -y -c conda-forge boost-cpp boost py-boost; \
-#         conda install -y -c conda-forge gxx_linux-64; \
-#     fi
-
-RUN conda activate rdkit_built_dep; pip install yapf==0.11.1
-RUN conda activate rdkit_built_dep; pip install coverage==3.7.1
-
-# BUILD RDKIT
-
-# source: https://www.rdkit.org/docs/Install.html
-# source: https://github.com/rdkit/rdkit/blob/master/Code/PgSQL/rdkit/README.md
-
-
-RUN mkdir /rdkit/build
-WORKDIR /rdkit/build
-
-
-
-RUN  UNAME_M="$(uname -m)" && \
-    conda activate rdkit_built_dep;\
-    BOOST_ROOT=""; \
-    if [ "${UNAME_M}" = "x86_64" ]; then \
-        BOOST_ROOT="$CONDA_PREFIX"; \
-    fi; \
-    cmake -DPy_ENABLE_SHARED=1 \
-      -DRDK_INSTALL_INTREE=ON \
-      -DRDK_INSTALL_STATIC_LIBS=OFF \
-      -DRDK_BUILD_CPP_TESTS=ON \
-      -DPYTHON_NUMPY_INCLUDE_PATH="$(python -c 'import numpy ; print(numpy.get_include())')" \
-      -DBOOST_ROOT="$BOOST_ROOT" \
-      -DBoost_NO_BOOST_CMAKE=OFF \
-      -DBoost_NO_SYSTEM_PATHS=OFF \
-      -DRDK_BUILD_AVALON_SUPPORT=ON \
-      -DRDK_BUILD_CAIRO_SUPPORT=ON \
-      -DRDK_BUILD_INCHI_SUPPORT=ON \
-      -D RDK_BUILD_PGSQL=ON \
-      -D PostgreSQL_CONFIG_DIR=/usr/lib/postgresql/$PG_MAJOR/bin \
-      -D PostgreSQL_INCLUDE_DIR="/usr/include/postgresql" \
-      -D PostgreSQL_TYPE_INCLUDE_DIR="/usr/include/postgresql/$PG_MAJOR/server" \
-      -D PostgreSQL_LIBRARY="/usr/lib/${UNAME_M}-linux-gnu/libpq.so.5" \
-      ..
-
-RUN make  -j $(nproc)
-# INSTALL RDKIT
-RUN make install
-RUN mkdir -p /etc/postgresql/$PG_MAJOR/main/
-RUN echo "LD_LIBRARY_PATH = '/rdkit/lib:$CONDA_PREFIX/lib'" | tee -a /etc/postgresql/$PG_MAJOR/main/environment
-
-# PREPARE RDKIT TESTING
-# # RUN chown postgres /rdkit/build/Code/PgSQL/rdkit/regression*
-# # RUN chown postgres /rdkit/build/Code/PgSQL/rdkit/results
-# RUN chown postgres /rdkit/build/Testing/Temporary/
-# # RUN chgrp postgres /rdkit/build/Code/RDGeneral; chmod g+w /rdkit/build/Code/RDGeneral
-# RUN touch /rdkit/build/Code/RDGeneral/error_log.txt; chown postgres /rdkit/build/Code/RDGeneral/error_log.txt
-# RUN chgrp postgres /rdkit/Code/ForceField/MMFF/test_data/; chmod g+w /rdkit/Code/ForceField/MMFF/test_data/
-# RUN chgrp postgres /rdkit/Code/GraphMol/FileParsers/test_data/; chmod g+w /rdkit/Code/GraphMol/FileParsers/test_data/
-# RUN chgrp postgres /rdkit/Code/GraphMol/Depictor/test_data/; chmod g+w /rdkit/Code/GraphMol/Depictor/test_data/
-# # RUN chgrp postgres /rdkit/build/Code/GraphMol/Depictor; chmod g+w /rdkit/build/Code/GraphMol/Depictor
-# RUN touch /rdkit/build/Code/GraphMol/Depictor/junk.mol; chown postgres /rdkit/build/Code/GraphMol/Depictor/junk.mol
-# RUN chgrp postgres /rdkit/Code/GraphMol/FileParsers/; chmod g+w /rdkit/Code/GraphMol/FileParsers/
-
-WORKDIR /rdkit
-RUN find . -type d -exec chgrp postgres {} +
-RUN find . -type d -exec chmod g+w {} +
-
-WORKDIR /
-
-# POSTGRES SERVER CONFIGURATION
-ADD postgresql.conf /
-
-# SETUP POSTGRES FOR TESTING
-RUN su postgres -l -c 'conda init'
+# Original configuration
 ENV POSTGRES_USER=protwis
-STOPSIGNAL SIGINT
-
-# Database initialisation and configuration scripts as Docker entrypoints.
-# https://github.com/docker-library/postgres/blob/master/16/bookworm/docker-ensure-initdb.sh
-# https://github.com/docker-library/postgres/blob/master/16/bookworm/docker-entrypoint.sh
-# Scripts only work if CMD is "postgres".
-# "bash -i docker-ensure-initdb.sh" runs the scripts with no CMD requeriment.
-
-
-CMD export PATH="$PATH:/usr/lib/postgresql/'$PG_MAJOR'/bin"; bash -i docker-ensure-initdb.sh; cp /postgresql.conf /var/lib/postgresql/data/postgresql.conf ; useradd -m -s /bin/bash $POSTGRES_USER; su postgres -l -c 'conda activate rdkit_built_dep; \
-  export PATH="$PATH:/usr/lib/postgresql/'$PG_MAJOR'/bin"; export LD_LIBRARY_PATH="/rdkit/lib:$CONDA_PREFIX/lib"; \
-  postgres -D '"$PGDATA"
-
-
-
-# # TEST RDKIT BUILD AND INSTALLATION
-# /bin/bash
-
-# su $POSTGRES_USER -l -c 'createuser -sE postgres'
-# su postgres
-
-# cd /rdkit/build
-# conda activate rdkit_built_dep
-
-# export RDBASE=$PWD/..
-# export PYTHONPATH=$RDBASE
-# export LD_LIBRARY_PATH=$RDBASE/lib:$LD_LIBRARY_PATH
-# psql -c 'create extension rdkit'
-# ctest
-
-# For running the image use for example:
-# docker run --network gpcrdb -d --platform linux/amd64 --name postgres16-rdkit2024_03_3_v3 \
-# -v postgres_data:/var/lib/postgresql/data \
-# -e POSTGRES_USER=protwis \
-# -e POSTGRES_PASSWORD=protwis \
-# -p 5432:5432 \
-# postgres16-rdkit2024_03_3_v3
-
-# docker run --network gpcrdb -d --platform linux/arm64 --name postgres16-rdkit2024_03_3_mac \
-# -v postgres_data:/var/lib/postgresql/data \
-# -e POSTGRES_USER=protwis \
-# -e POSTGRES_PASSWORD=protwis \
-# -p 5432:5432 \
-# postgres16-rdkit2024_03_3_mac
+CMD ["postgres"]
