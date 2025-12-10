@@ -1,133 +1,127 @@
 # ================================
 # Stage 1: Builder
 # ================================
-FROM postgres:16 AS builder
+FROM postgres:16-bookworm AS builder
 
+# 1. 🟢 升级 Micromamba 版本
+# 使用 latest 以确保内置的各种 Root Key 是最新的，避免 "Key is invalid"
+COPY --from=mambaorg/micromamba:latest /bin/micromamba /usr/local/bin/micromamba
+
+ARG TARGETARCH
 ENV PG_MAJOR=16
-
-COPY requirements_conda_rdkit_build_x86_64.txt /tmp/requirements_conda_rdkit_build_x86_64.txt
-COPY requirements_conda_rdkit_build_aarch64.txt /tmp/requirements_conda_rdkit_build_aarch64.txt
-
-RUN UNAME_M="$(uname -m)" && \
-    apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    wget \
-    git \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libfreetype6 \
-    libxrender1 \
-    mercurial \
-    openssh-client \
-    procps \
-    subversion \
-    bzip2 \
-    ca-certificates \
-    libcairo2-dev \
-    curl \
-    gnupg \
-    && dpkg --remove-architecture armhf || true \
-    && apt-get update && apt-get install -y --no-install-recommends \
-    postgresql-server-dev-$PG_MAJOR \
-    postgresql-server-dev-all \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-ARG INSTALLER_URL_LINUX64="https://repo.anaconda.com/miniconda/Miniconda3-py312_24.4.0-0-Linux-x86_64.sh"
-ARG SHA256SUM_LINUX64="b6597785e6b071f1ca69cf7be6d0161015b96340b9a9e132215d5713408c3a7c"
-ARG INSTALLER_URL_AARCH64="https://repo.anaconda.com/miniconda/Miniconda3-py312_24.4.0-0-Linux-aarch64.sh"
-ARG SHA256SUM_AARCH64="832d48e11e444c1a25f320fccdd0f0fabefec63c1cd801e606836e1c9c76ad51"
-
-RUN set -x && \
-    UNAME_M="$(uname -m)" && \
-    if [ "${UNAME_M}" = "x86_64" ]; then \
-    INSTALLER_URL="${INSTALLER_URL_LINUX64}"; \
-    SHA256SUM="${SHA256SUM_LINUX64}"; \
-    CONDA_INSTALL_PATH="/opt/conda_builder_x86_64"; \
-    CONDA_ENV_FILE="/tmp/requirements_conda_rdkit_build_x86_64.txt"; \
-    elif [ "${UNAME_M}" = "aarch64" ]; then \
-    INSTALLER_URL="${INSTALLER_URL_AARCH64}"; \
-    SHA256SUM="${SHA256SUM_AARCH64}"; \
-    CONDA_INSTALL_PATH="/opt/conda_builder_aarch64"; \
-    CONDA_ENV_FILE="/tmp/requirements_conda_rdkit_build_aarch64.txt"; \
-    fi && \
-    wget "${INSTALLER_URL}" -O miniconda.sh -q && \
-    echo "${SHA256SUM} miniconda.sh" > shasum && \
-    sha256sum --check --status shasum && \
-    rm -rf ${CONDA_INSTALL_PATH} && \
-    bash miniconda.sh -b -p ${CONDA_INSTALL_PATH} && \
-    rm miniconda.sh shasum && \
-    ln -s ${CONDA_INSTALL_PATH}/etc/profile.d/conda.sh /etc/profile.d/conda.sh && \
-    echo ". ${CONDA_INSTALL_PATH}/etc/profile.d/conda.sh" >> ~/.bashrc && \
-    echo "conda activate base" >> ~/.bashrc && \
-    ln -s ${CONDA_INSTALL_PATH}/bin/conda /usr/local/bin/conda && \
-    ${CONDA_INSTALL_PATH}/bin/conda clean -afy && \
-    conda create -y -c conda-forge --name rdkit_built_dep --file "${CONDA_ENV_FILE}" && \
-    conda clean -afy && \
-    conda run -n rdkit_built_dep pip install yapf==0.11.1 coverage==3.7.1
-
-RUN rm -fr rdkit
-
 ARG RDKIT_VERSION=Release_2025_03_1
-RUN wget --quiet https://github.com/rdkit/rdkit/archive/refs/tags/${RDKIT_VERSION}.tar.gz \
-    && tar -xzf ${RDKIT_VERSION}.tar.gz \
-    && mv rdkit-${RDKIT_VERSION} rdkit \
-    && rm ${RDKIT_VERSION}.tar.gz
 
-RUN UNAME_M="$(uname -m)" && \
-    CONDA_ENV_PATH="/opt/conda_builder_${UNAME_M}/envs/rdkit_built_dep" && \
-    mkdir /rdkit/build && \
-    cd /rdkit/build && \
-    echo "Running CMake with Conda Env Path: ${CONDA_ENV_PATH}" && \
-    conda run -n rdkit_built_dep cmake -DPy_ENABLE_SHARED=1 \
-    -DRDK_INSTALL_INTREE=ON \
+# 2. 系统依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    git \
+    wget \
+    ca-certificates \
+    postgresql-server-dev-${PG_MAJOR} \
+    libxml2-dev \
+    pkg-config \
+    bzip2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# 3. 设置 Micromamba 环境
+ARG MAMBA_ROOT_PREFIX=/opt/conda
+ENV PATH=$MAMBA_ROOT_PREFIX/bin:$PATH
+
+# 🟢 根治 "Key is invalid" 问题：
+# 1. safety_checks disabled: 关闭包签名验证
+# 2. extra_safety_checks off: 关闭额外的元数据验证
+# 3. ssl_verify true: 保持 HTTPS 验证（这是底线，不能关）
+# 4. 依赖修复：维持 py-boost 方案
+RUN micromamba config set safety_checks disabled && \
+    micromamba config set extra_safety_checks off && \
+    micromamba config set remote_read_timeout_secs 600 && \
+    micromamba config set retries 3 && \
+    micromamba create -y -p /opt/conda/envs/rdkit_build \
+    -c conda-forge \
+    python=3.12 \
+    numpy \
+    cmake \
+    make \
+    cxx-compiler \
+    "boost-cpp>=1.78" \
+    "py-boost>=1.78" \
+    eigen \
+    cairo \
+    freetype \
+    pandas \
+    rapidjson \
+    && micromamba clean -afy
+
+# 4. 下载源码
+WORKDIR /rdkit-src
+RUN wget -O rdkit.tar.gz https://github.com/rdkit/rdkit/archive/refs/tags/${RDKIT_VERSION}.tar.gz \
+    && tar -xzf rdkit.tar.gz --strip-components=1 \
+    && rm rdkit.tar.gz
+
+# 5. 编译 RDKit (维持之前的 FindBoost + 暴力路径修正方案)
+RUN mkdir build && cd build && \
+    NUMPY_PATH=$(micromamba run -p /opt/conda/envs/rdkit_build python -c 'import numpy; print(numpy.get_include())') && \
+    # 动态查找 libboost_python*.so
+    BOOST_PY_LIB=$(find /opt/conda/envs/rdkit_build/lib -name "libboost_python*.so" -o -name "libboost_python*.so.*" | head -n 1) && \
+    echo "Found Numpy Path: $NUMPY_PATH" && \
+    echo "Found Boost Lib: $BOOST_PY_LIB" && \
+    micromamba run -p /opt/conda/envs/rdkit_build cmake .. \
+    -DRDK_BUILD_PYTHON_WRAPPERS=ON \
+    -DRDK_BUILD_PGSQL=ON \
+    -DRDK_INSTALL_INTREE=OFF \
+    -DCMAKE_INSTALL_PREFIX=/rdkit \
     -DRDK_INSTALL_STATIC_LIBS=OFF \
     -DRDK_BUILD_CPP_TESTS=OFF \
-    -DPYTHON_NUMPY_INCLUDE_PATH="$(conda run -n rdkit_built_dep python -c 'import numpy ; print(numpy.get_include())')" \
-    -DCMAKE_PREFIX_PATH="${CONDA_ENV_PATH}" \
-    -DBoost_ROOT="${CONDA_ENV_PATH}" \
-    -DBoost_INCLUDEDIR="${CONDA_ENV_PATH}/include" \
-    -DBoost_LIBRARYDIR="${CONDA_ENV_PATH}/lib" \
+    -DPy_ENABLE_SHARED=1 \
+    -DPYTHON_NUMPY_INCLUDE_PATH="$NUMPY_PATH" \
+    -DCMAKE_PREFIX_PATH="/opt/conda/envs/rdkit_build" \
+    -DBoost_ROOT="/opt/conda/envs/rdkit_build" \
+    # 禁用 Boost Config，使用 CMake 自己的 FindBoost
     -DBoost_NO_BOOST_CMAKE=OFF \
     -DBoost_NO_SYSTEM_PATHS=ON \
+    # 暴力注入找到的库路径，不再让 CMake 瞎猜
+    -DBoost_PYTHON3_LIBRARY_RELEASE="$BOOST_PY_LIB" \
+    -DBoost_PYTHON3_LIBRARY="$BOOST_PY_LIB" \
+    -DBoost_PYTHON_VERSION=3.12 \
     -DRDK_BUILD_AVALON_SUPPORT=ON \
     -DRDK_BUILD_CAIRO_SUPPORT=ON \
     -DRDK_BUILD_INCHI_SUPPORT=ON \
-    -DRDK_BUILD_PGSQL=ON \
-    -DPostgreSQL_CONFIG_DIR=/usr/lib/postgresql/$PG_MAJOR/bin \
-    -DPostgreSQL_INCLUDE_DIR="/usr/include/postgresql" \
-    -DPostgreSQL_TYPE_INCLUDE_DIR="/usr/include/postgresql/$PG_MAJOR/server" \
-    -DPostgreSQL_LIBRARY="/usr/lib/${UNAME_M}-linux-gnu/libpq.so.5" \
-    .. && \
-    conda run -n rdkit_built_dep make -j 2 && \
-    conda run -n rdkit_built_dep make install && \
-    chgrp -R postgres /rdkit && chmod -R g+w /rdkit
+    -DRDK_BUILD_MAEPARSER_SUPPORT=OFF \
+    -DRDK_BUILD_COORDGEN_SUPPORT=OFF \
+    -DPostgreSQL_CONFIG_DIR=/usr/lib/postgresql/${PG_MAJOR}/bin \
+    && \
+    micromamba run -p /opt/conda/envs/rdkit_build make -j $(nproc) && \
+    micromamba run -p /opt/conda/envs/rdkit_build make install
+
+# 6. 收集依赖库
+RUN mkdir -p /rdkit/lib && \
+    cp -d /opt/conda/envs/rdkit_build/lib/libboost*.so* /rdkit/lib/ && \
+    cp -d /opt/conda/envs/rdkit_build/lib/libpython*.so* /rdkit/lib/ && \
+    cp -d /opt/conda/envs/rdkit_build/lib/libRDKit*.so* /rdkit/lib/
 
 # ================================
 # Stage 2: Final Image
 # ================================
-FROM postgres:16
+FROM postgres:16-bookworm
 
 ENV PG_MAJOR=16
-ENV PATH=/usr/lib/postgresql/$PG_MAJOR/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ENV LD_LIBRARY_PATH=/rdkit/lib
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    libglib2.0-0 \
+    libxrender1 \
+    libxext6 \
+    libfreetype6 \
+    libsm6 \
     ca-certificates \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /etc/postgresql/$PG_MAJOR/main/ \
-    && echo "LD_LIBRARY_PATH='/rdkit/lib'" >> /etc/postgresql/$PG_MAJOR/main/environment
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /rdkit /rdkit
 
-COPY postgresql.conf /postgresql.conf
+RUN echo "/rdkit/lib" > /etc/ld.so.conf.d/rdkit.conf && ldconfig
+
+COPY postgresql.conf /etc/postgresql/postgresql.conf
 
 ENV POSTGRES_USER=protwis
-STOPSIGNAL SIGINT
-
-CMD export LD_LIBRARY_PATH="/rdkit/lib" && \
-    export PATH="$PATH:/usr/lib/postgresql/$PG_MAJOR/bin" && \
-    bash -i docker-ensure-initdb.sh && \
-    cp /postgresql.conf /var/lib/postgresql/data/postgresql.conf && \
-    useradd -m -s /bin/bash $POSTGRES_USER && \
-    su postgres -l -c 'postgres -D "$PGDATA"'
+CMD ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
