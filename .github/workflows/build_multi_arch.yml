@@ -76,7 +76,7 @@ jobs:
           build-args: |
             CACHEBUST=${{ env.RELEASE_DATE }}
           cache-from: type=gha,scope=arm64
-          cache-to: type=gha,mode=max,scope=arm64
+          #cache-to: type=gha,mode=max,scope=arm64
 
   # Merge manifests
   merge-manifests:
