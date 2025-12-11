@@ -1,7 +1,7 @@
 # ================================
 # Stage 1: Builder (Native Debian)
 # ================================
-FROM postgres:16-bookworm AS builder
+FROM postgres:16-trixie AS builder
 ENV PG_MAJOR=16
 
 # [DYNAMIC FETCH] 1. Install build tools (Added 'curl' to fetch API)
@@ -66,7 +66,7 @@ RUN mkdir build && cd build && \
 # ================================
 # Stage 2: Final Image
 # ================================
-FROM postgres:16-bookworm
+FROM postgres:16-trixie
 ENV PG_MAJOR=16
 
 # Install runtime dependencies
