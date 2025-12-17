@@ -25,24 +25,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # 2. Download source code
 WORKDIR /rdkit-src
-# Dynamic fetch commented out for stability
-# RUN echo "🔍 Fetching latest RDKit release tag from GitHub..." && \
-#     export LATEST_TAG=$(curl -sL https://api.github.com/repos/rdkit/rdkit/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/') && \
-#     echo "🔥 Detected Latest RDKit Release: ${LATEST_TAG}" && \
-#     # Record version info file for debugging/tracking
-#     echo "${LATEST_TAG}" > /rdkit_version.txt && \
-#     git clone --depth 1 --branch ${LATEST_TAG} https://github.com/rdkit/rdkit.git . && \
-#     rm -rf .git
-
 # Static version clone
 RUN git clone --depth 1 --branch ${RDKIT_VERSION} https://github.com/rdkit/rdkit.git . \
     && rm -rf .git
 
 # 3. Compile RDKit
-# Key fix points:
-# 1. -DCMAKE_INSTALL_PREFIX=/rdkit : Ensure make install puts files in /rdkit
-# 2. -DPostgreSQL_... : Resolve missing postgres.h issue
-# 3. -std=gnu89 : Resolve old code compilation issues with new GCC
 RUN mkdir build && cd build && \
     cmake .. \
     -DCMAKE_INSTALL_PREFIX=/rdkit \
@@ -64,14 +51,30 @@ RUN mkdir build && cd build && \
     make -j $(nproc) && \
     make install
 
+# 4. Artifact Staging
+# Prepare a single directory /dist requiring only one COPY in final stage
+WORKDIR /dist
+RUN mkdir -p /dist/rdkit \
+    /dist/usr/lib/postgresql/${PG_MAJOR}/lib \
+    /dist/usr/share/postgresql/${PG_MAJOR}/extension
+
+# Move RDKit core library
+RUN cp -r /rdkit/* /dist/rdkit/
+
+# Move Postgres extension files
+RUN cp /usr/lib/postgresql/${PG_MAJOR}/lib/rdkit.so /dist/usr/lib/postgresql/${PG_MAJOR}/lib/
+RUN cp /usr/share/postgresql/${PG_MAJOR}/extension/rdkit* /dist/usr/share/postgresql/${PG_MAJOR}/extension/
+
 # ================================
 # Stage 2: Final Image
 # ================================
 FROM postgres:16-bookworm
 ENV PG_MAJOR=16
 
-# Install runtime dependencies
-# libfreetype6 is required, otherwise rdkit.so will report symbol lookup error
+# 1. Copy all artifacts from builder in a single layer
+COPY --from=builder /dist /
+
+# 2. Install runtime dependencies & Configure System
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libboost-serialization1.74.0 \
     libboost-system1.74.0 \
@@ -82,26 +85,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxml2 \
     libfreetype6 \
     ca-certificates \
+    && echo "/rdkit/lib" > /etc/ld.so.conf.d/rdkit.conf \
+    && ldconfig \
     && rm -rf /var/lib/apt/lists/*
-
-# Copy RDKit core library (now available in builder)
-COPY --from=builder /rdkit /rdkit
-
-# Copy Postgres extension
-# Principle: RDKit extension is installed, but usually according to pg_config to system Postgres directory
-# So we need to take them out from system directory
-COPY --from=builder /usr/lib/postgresql/${PG_MAJOR}/lib/rdkit.so /usr/lib/postgresql/${PG_MAJOR}/lib/
-COPY --from=builder /usr/share/postgresql/${PG_MAJOR}/extension/rdkit* /usr/share/postgresql/${PG_MAJOR}/extension/
-
-# Link library
-# Tell system to look for libRDKit*.so in /rdkit/lib
-RUN echo "/rdkit/lib" > /etc/ld.so.conf.d/rdkit.conf && ldconfig
 
 # Original configuration
 ENV POSTGRES_USER=protwis
 
-# Custom Configuration
-COPY postgresql.conf /etc/postgresql/postgresql.conf
-RUN chown postgres:postgres /etc/postgresql/postgresql.conf
+# Custom Configuration (Kept at the end to preserve cache during config tuning)
+COPY --chown=postgres:postgres postgresql.conf /etc/postgresql/postgresql.conf
 
 CMD ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
